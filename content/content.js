@@ -32,9 +32,13 @@ function scheduleBufferSave() {
   state.saveTimer = setTimeout(async () => {
     state.saveTimer = null;
     const session = await getRecordingSession();
-    if (!session.active) return; // stop already fired
+    if (!session.active) {
+      console.log('[apply-plugin/content] scheduleBufferSave: session not active, skipping save');
+      return;
+    }
     session.buffer = Object.fromEntries(state.buffer);
     await setRecordingSession(session);
+    console.log('[apply-plugin/content] scheduleBufferSave: persisted', Object.keys(session.buffer).length, 'fields');
   }, 300);
 }
 
@@ -75,14 +79,15 @@ function attachListeners() {
 }
 
 async function startRecording() {
+  console.log('[apply-plugin/content] startRecording called', { origin: location.origin });
   const session = await getRecordingSession();
+  console.log('[apply-plugin/content] startRecording: existing session', session);
   if (session.active && session.origin === location.origin) {
-    // Re-arming the same session (popup-side already in progress).
     state.buffer = new Map(Object.entries(session.buffer));
     if (!state.recordCleanup) attachListeners();
+    console.log('[apply-plugin/content] startRecording: re-armed existing session');
     return { ok: true, alreadyRecording: true, fieldCount: state.buffer.size };
   }
-  // Fresh session.
   state.buffer.clear();
   await setRecordingSession({
     active: true,
@@ -90,7 +95,10 @@ async function startRecording() {
     buffer: {},
     startedAt: Date.now(),
   });
+  const verify = await getRecordingSession();
+  console.log('[apply-plugin/content] startRecording: wrote session, readback=', verify);
   const fieldCount = attachListeners();
+  console.log('[apply-plugin/content] startRecording: attached listeners on', fieldCount, 'fields');
   return { ok: true, fieldCount };
 }
 
@@ -140,13 +148,16 @@ async function recordStatus() {
 // transparently continues across navigations.
 (async () => {
   try {
+    console.log('[apply-plugin/content] content script booted on', location.href);
     const session = await getRecordingSession();
+    console.log('[apply-plugin/content] boot: existing session', session);
     if (session.active && session.origin === location.origin) {
       state.buffer = new Map(Object.entries(session.buffer));
       attachListeners();
+      console.log('[apply-plugin/content] boot: rehydrated session with', state.buffer.size, 'fields');
     }
   } catch (e) {
-    console.warn('apply-plugin: failed to rehydrate recording session', e);
+    console.warn('[apply-plugin/content] failed to rehydrate recording session', e);
   }
 })();
 

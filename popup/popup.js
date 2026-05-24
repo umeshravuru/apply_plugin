@@ -47,21 +47,26 @@ function setRecordButton(isRecording) {
 // (e.g., right after the extension was reloaded).
 async function syncRecordingState() {
   try {
+    console.log('[apply-plugin/popup] syncRecordingState reading chrome.storage.local');
     const session = await getRecordingSession();
+    console.log('[apply-plugin/popup] session from storage:', session);
     setRecordButton(!!session.active);
     if (session.active) {
       const captured = Object.keys(session.buffer).length;
       const tab = await chrome.tabs.query({ active: true, currentWindow: true }).then((t) => t[0]);
       const tabOrigin = tab?.url ? new URL(tab.url).origin : '';
       const sameOrigin = !tabOrigin || tabOrigin === session.origin;
+      console.log('[apply-plugin/popup] active session, tabOrigin=', tabOrigin, 'sameOrigin=', sameOrigin);
       if (sameOrigin) {
         setStatus('main-status', `Recording on ${session.origin || 'this page'} (${captured} fields captured). Click Stop when done.`, 'ok');
       } else {
         setStatus('main-status', `Recording is active on ${session.origin}. Switch back to that site to stop, or click Stop here to discard.`, 'error');
       }
+    } else {
+      console.log('[apply-plugin/popup] no active session — button stays at Start');
     }
   } catch (e) {
-    console.warn('apply-plugin: syncRecordingState failed', e);
+    console.warn('[apply-plugin/popup] syncRecordingState failed', e);
   }
 }
 syncRecordingState();
