@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Apply Plugin</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>Apply Plugin</h1>
+    <nav>
+      <button data-view="main" class="active">Main</button>
+      <button data-view="profile">Profile</button>
+      <button data-view="settings">Settings</button>
+    </nav>
+  </header>
+
+  <section id="view-main" class="view active">
+    <button id="btn-record" class="primary">Start Recording</button>
+    <button id="btn-fill" class="primary">Fill This Page</button>
+    <p id="main-status" class="status"></p>
+  </section>
+
+  <section id="view-profile" class="view">
+    <h2>Saved Profile</h2>
+    <div id="profile-list"></div>
+    <div class="row">
+      <button id="btn-export">Export JSON</button>
+      <button id="btn-import">Import JSON</button>
+      <input type="file" id="import-file" accept="application/json" hidden>
+    </div>
+    <p id="profile-status" class="status"></p>
+  </section>
+
+  <section id="view-settings" class="view">
+    <h2>Settings</h2>
+    <label>
+      Gemini API key
+      <input type="password" id="api-key" placeholder="AIza...">
+    </label>
+    <label>
+      Model
+      <select id="model">
+        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+      </select>
+    </label>
+    <div class="row">
+      <button id="btn-save-settings" class="primary">Save</button>
+      <button id="btn-test">Test connection</button>
+    </div>
+    <p id="settings-status" class="status"></p>
+    <p class="hint">Get a free key at <span class="link">aistudio.google.com/apikey</span>. Stored locally; never sent anywhere except Google's Gemini API.</p>
+  </section>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
