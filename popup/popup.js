@@ -1,6 +1,7 @@
 import { MSG } from '../lib/messages.js';
 import {
   getProfile, setProfile, mergeProfile, getSettings, setSettings,
+  getRecordingSession, clearRecordingSession,
 } from '../lib/storage.js';
 
 async function activeTabId() {
@@ -41,22 +42,42 @@ function setRecordButton(isRecording) {
   btnRecord.textContent = isRecording ? 'Stop Recording' : 'Start Recording';
 }
 
-// On popup open, ask the content script whether it's currently recording so
-// the UI reflects the real state (popup state is lost every time it closes).
+// On popup open, read recording state straight from chrome.storage.local.
+// This works even if the content script hasn't loaded on the current tab yet
+// (e.g., right after the extension was reloaded).
 async function syncRecordingState() {
   try {
-    const res = await sendToTab({ type: MSG.RECORD_STATUS });
-    if (res?.ok) {
-      setRecordButton(!!res.recording);
-      if (res.recording) {
-        setStatus('main-status', `Recording in progress (${res.bufferedCount} fields captured so far). Click Stop when done.`, 'ok');
+    const session = await getRecordingSession();
+    setRecordButton(!!session.active);
+    if (session.active) {
+      const captured = Object.keys(session.buffer).length;
+      const tab = await chrome.tabs.query({ active: true, currentWindow: true }).then((t) => t[0]);
+      const tabOrigin = tab?.url ? new URL(tab.url).origin : '';
+      const sameOrigin = !tabOrigin || tabOrigin === session.origin;
+      if (sameOrigin) {
+        setStatus('main-status', `Recording on ${session.origin || 'this page'} (${captured} fields captured). Click Stop when done.`, 'ok');
+      } else {
+        setStatus('main-status', `Recording is active on ${session.origin}. Switch back to that site to stop, or click Stop here to discard.`, 'error');
       }
     }
-  } catch {
-    // Content script not loaded on this page (e.g., chrome:// URLs). Leave defaults.
+  } catch (e) {
+    console.warn('apply-plugin: syncRecordingState failed', e);
   }
 }
 syncRecordingState();
+
+async function stopFromStorageDirectly() {
+  // Fallback when the content script isn't reachable (extension was just
+  // reloaded, tab was switched, etc.). Read the persisted session, merge
+  // its buffer into the profile, clear the session.
+  const session = await getRecordingSession();
+  const captured = session.buffer || {};
+  if (Object.keys(captured).length > 0) {
+    await mergeProfile(captured);
+  }
+  await clearRecordingSession();
+  return Object.keys(captured).length;
+}
 
 btnRecord.addEventListener('click', async () => {
   try {
@@ -66,10 +87,19 @@ btnRecord.addEventListener('click', async () => {
       setRecordButton(true);
       setStatus('main-status', `Recording ${res.fieldCount} fields. Fill the form, then reopen this popup and click Stop.`, 'ok');
     } else {
-      const res = await sendToTab({ type: MSG.RECORD_STOP });
-      if (!res?.ok) throw new Error(res?.error || 'Could not stop');
+      let savedCount;
+      try {
+        const res = await sendToTab({ type: MSG.RECORD_STOP });
+        if (!res?.ok) throw new Error(res?.error || 'Could not stop');
+        savedCount = res.savedCount ?? 0;
+      } catch (e) {
+        // Content script unreachable (e.g., extension was reloaded mid-record).
+        // Fall back to flushing the persisted buffer directly.
+        console.warn('apply-plugin: RECORD_STOP message failed, falling back to storage merge', e);
+        savedCount = await stopFromStorageDirectly();
+      }
       setRecordButton(false);
-      setStatus('main-status', `Saved ${res.savedCount ?? 0} fields to your profile.`, 'ok');
+      setStatus('main-status', `Saved ${savedCount} fields to your profile.`, 'ok');
     }
   } catch (e) {
     setStatus('main-status', e.message || String(e), 'error');
