@@ -10,7 +10,9 @@ const state = {
 };
 
 function startRecording() {
-  if (state.recording) return { ok: true, alreadyRecording: true };
+  if (state.recording) {
+    return { ok: true, alreadyRecording: true, fieldCount: state.recordBuffer.size };
+  }
   state.recording = true;
   state.recordBuffer.clear();
   const fields = scanFields(document.body);
@@ -30,8 +32,11 @@ function startRecording() {
       }
       if (val !== '') state.recordBuffer.set(f.label, val);
     };
+    // Listen on change, blur, AND input. Some React/Vue ATSes only emit
+    // synthetic input events; some custom widgets only emit blur.
     f.el.addEventListener('change', handler, true);
     f.el.addEventListener('blur', handler, true);
+    f.el.addEventListener('input', handler, true);
     // for radio groups, also listen on other radios with same name
     if (f.type === 'radio') {
       const radios = document.querySelectorAll(
@@ -44,6 +49,7 @@ function startRecording() {
     } else {
       handlers.push([f.el, 'change', handler]);
       handlers.push([f.el, 'blur', handler]);
+      handlers.push([f.el, 'input', handler]);
     }
   }
   state.recordCleanup = () => {
@@ -52,14 +58,41 @@ function startRecording() {
   return { ok: true, fieldCount: fields.length };
 }
 
-function stopRecording() {
-  if (!state.recording) return { ok: true, captured: {} };
+async function stopRecording() {
+  if (!state.recording) return { ok: true, captured: {}, savedCount: 0 };
   state.recording = false;
   if (state.recordCleanup) state.recordCleanup();
   state.recordCleanup = null;
+  // Flush any final values from currently-focused fields by reading them
+  // directly off the DOM (in case blur/change never fired before Stop).
+  const fields = scanFields(document.body);
+  for (const f of fields) {
+    let val = '';
+    if (f.type === 'radio') {
+      const checked = document.querySelector(
+        `input[type="radio"][name="${CSS.escape(f.el.name)}"]:checked`
+      );
+      if (checked) val = checked.value;
+    } else if (f.type === 'checkbox') {
+      val = f.el.checked ? 'Yes' : 'No';
+    } else {
+      val = f.el.value;
+    }
+    if (val !== '') state.recordBuffer.set(f.label, val);
+  }
   const captured = Object.fromEntries(state.recordBuffer);
   state.recordBuffer.clear();
-  return { ok: true, captured };
+  // Persist from the content script directly — the popup may have closed.
+  await mergeProfile(captured);
+  return { ok: true, captured, savedCount: Object.keys(captured).length };
+}
+
+function recordStatus() {
+  return {
+    ok: true,
+    recording: state.recording,
+    bufferedCount: state.recordBuffer.size,
+  };
 }
 
 async function startFill() {
@@ -180,7 +213,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse(startRecording());
       return false;
     case MSG.RECORD_STOP:
-      sendResponse(stopRecording());
+      stopRecording().then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e.message || e) }));
+      return true;
+    case MSG.RECORD_STATUS:
+      sendResponse(recordStatus());
       return false;
     case MSG.FILL_START:
       startFill().then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e.message || e) }));

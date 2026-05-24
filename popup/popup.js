@@ -36,22 +36,40 @@ let recording = false;
 const btnRecord = document.getElementById('btn-record');
 const btnFill = document.getElementById('btn-fill');
 
+function setRecordButton(isRecording) {
+  recording = isRecording;
+  btnRecord.textContent = isRecording ? 'Stop Recording' : 'Start Recording';
+}
+
+// On popup open, ask the content script whether it's currently recording so
+// the UI reflects the real state (popup state is lost every time it closes).
+async function syncRecordingState() {
+  try {
+    const res = await sendToTab({ type: MSG.RECORD_STATUS });
+    if (res?.ok) {
+      setRecordButton(!!res.recording);
+      if (res.recording) {
+        setStatus('main-status', `Recording in progress (${res.bufferedCount} fields captured so far). Click Stop when done.`, 'ok');
+      }
+    }
+  } catch {
+    // Content script not loaded on this page (e.g., chrome:// URLs). Leave defaults.
+  }
+}
+syncRecordingState();
+
 btnRecord.addEventListener('click', async () => {
   try {
     if (!recording) {
       const res = await sendToTab({ type: MSG.RECORD_START });
       if (!res?.ok) throw new Error(res?.error || 'Could not start');
-      recording = true;
-      btnRecord.textContent = 'Stop Recording';
-      setStatus('main-status', `Recording ${res.fieldCount} fields…`, 'ok');
+      setRecordButton(true);
+      setStatus('main-status', `Recording ${res.fieldCount} fields. Fill the form, then reopen this popup and click Stop.`, 'ok');
     } else {
       const res = await sendToTab({ type: MSG.RECORD_STOP });
       if (!res?.ok) throw new Error(res?.error || 'Could not stop');
-      const captured = res.captured || {};
-      await mergeProfile(captured);
-      recording = false;
-      btnRecord.textContent = 'Start Recording';
-      setStatus('main-status', `Saved ${Object.keys(captured).length} fields.`, 'ok');
+      setRecordButton(false);
+      setStatus('main-status', `Saved ${res.savedCount ?? 0} fields to your profile.`, 'ok');
     }
   } catch (e) {
     setStatus('main-status', e.message || String(e), 'error');
