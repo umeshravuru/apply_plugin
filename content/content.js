@@ -1,17 +1,9 @@
 import { MSG } from '../lib/messages.js';
-import {
-  mergeProfile, getProfile,
-  getRecordingSession, setRecordingSession, clearRecordingSession,
-} from '../lib/storage.js';
+import { mergeProfile, getProfile, clearLegacyRecordingSession } from '../lib/storage.js';
 import { scanFields, applyFill } from '../lib/fields.js';
 
-// In-memory mirror of the persisted session. The source of truth is
-// chrome.storage.local — see lib/storage.js getRecordingSession.
 const state = {
-  recordCleanup: null,     // function to remove listeners (in-memory only)
-  buffer: new Map(),       // label → value (mirrors session.buffer)
-  saveTimer: null,         // debounce timer id for storage writes
-  lastScan: [],            // last fill scan (so we can re-apply after missing-field submit)
+  lastScan: [],            // last fill scan (for re-applying after missing-field panel submit)
 };
 
 function readCurrentValue(f) {
@@ -27,139 +19,23 @@ function readCurrentValue(f) {
   return f.el.value || '';
 }
 
-function scheduleBufferSave() {
-  if (state.saveTimer != null) clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(async () => {
-    state.saveTimer = null;
-    const session = await getRecordingSession();
-    if (!session.active) {
-      console.log('[apply-plugin/content] scheduleBufferSave: session not active, skipping save');
-      return;
-    }
-    session.buffer = Object.fromEntries(state.buffer);
-    await setRecordingSession(session);
-    console.log('[apply-plugin/content] scheduleBufferSave: persisted', Object.keys(session.buffer).length, 'fields');
-  }, 300);
-}
-
-function attachListeners() {
+// Snapshot every visible form field that currently has a value and merge
+// the result into the saved profile. Stateless — every click is a fresh
+// read of whatever is on the page right now.
+async function captureNow() {
   const fields = scanFields(document.body);
-  const handlers = [];
-  for (const f of fields) {
-    const handler = () => {
-      const val = readCurrentValue(f);
-      if (val !== '') {
-        state.buffer.set(f.label, val);
-        scheduleBufferSave();
-      }
-    };
-    // Listen on change, blur, AND input. Some React/Vue ATSes only emit
-    // synthetic input events; some custom widgets only emit blur.
-    f.el.addEventListener('change', handler, true);
-    f.el.addEventListener('blur', handler, true);
-    f.el.addEventListener('input', handler, true);
-    if (f.type === 'radio') {
-      const radios = document.querySelectorAll(
-        `input[type="radio"][name="${CSS.escape(f.el.name)}"]`
-      );
-      radios.forEach((r) => {
-        r.addEventListener('change', handler, true);
-        handlers.push([r, 'change', handler]);
-      });
-    } else {
-      handlers.push([f.el, 'change', handler]);
-      handlers.push([f.el, 'blur', handler]);
-      handlers.push([f.el, 'input', handler]);
-    }
-  }
-  state.recordCleanup = () => {
-    handlers.forEach(([el, ev, h]) => el.removeEventListener(ev, h, true));
-  };
-  return fields.length;
-}
-
-async function startRecording() {
-  console.log('[apply-plugin/content] startRecording called', { origin: location.origin });
-  const session = await getRecordingSession();
-  console.log('[apply-plugin/content] startRecording: existing session', session);
-  if (session.active && session.origin === location.origin) {
-    state.buffer = new Map(Object.entries(session.buffer));
-    if (!state.recordCleanup) attachListeners();
-    console.log('[apply-plugin/content] startRecording: re-armed existing session');
-    return { ok: true, alreadyRecording: true, fieldCount: state.buffer.size };
-  }
-  state.buffer.clear();
-  await setRecordingSession({
-    active: true,
-    origin: location.origin,
-    buffer: {},
-    startedAt: Date.now(),
-  });
-  const verify = await getRecordingSession();
-  console.log('[apply-plugin/content] startRecording: wrote session, readback=', verify);
-  const fieldCount = attachListeners();
-  console.log('[apply-plugin/content] startRecording: attached listeners on', fieldCount, 'fields');
-  return { ok: true, fieldCount };
-}
-
-async function stopRecording() {
-  // Read whatever the persisted session has, plus any in-memory buffer not yet flushed.
-  const session = await getRecordingSession();
-  if (!session.active) {
-    // Nothing to do, but still clear any in-memory listeners.
-    if (state.recordCleanup) { state.recordCleanup(); state.recordCleanup = null; }
-    return { ok: true, captured: {}, savedCount: 0 };
-  }
-
-  if (state.recordCleanup) { state.recordCleanup(); state.recordCleanup = null; }
-  if (state.saveTimer != null) { clearTimeout(state.saveTimer); state.saveTimer = null; }
-
-  // Final flush: re-read every currently-visible field directly from the DOM
-  // in case blur/change never fired on the last-touched one.
-  const merged = new Map(Object.entries(session.buffer));
-  for (const [k, v] of state.buffer) merged.set(k, v);
-  const fields = scanFields(document.body);
+  const captured = {};
   for (const f of fields) {
     const val = readCurrentValue(f);
-    if (val !== '') merged.set(f.label, val);
+    if (val !== '') captured[f.label] = val;
   }
-
-  const captured = Object.fromEntries(merged);
-  state.buffer.clear();
-  await mergeProfile(captured);
-  await clearRecordingSession();
-  return { ok: true, captured, savedCount: Object.keys(captured).length };
+  const savedCount = Object.keys(captured).length;
+  if (savedCount > 0) await mergeProfile(captured);
+  return { ok: true, captured, savedCount, scannedCount: fields.length };
 }
 
-async function recordStatus() {
-  const session = await getRecordingSession();
-  const sameOrigin = session.active && session.origin === location.origin;
-  return {
-    ok: true,
-    recording: session.active,
-    sameOrigin,
-    origin: session.origin,
-    bufferedCount: Object.keys(session.buffer).length + state.buffer.size,
-  };
-}
-
-// On page load (or extension reload + page refresh), if a session is active
-// for this origin, re-attach listeners with the saved buffer so recording
-// transparently continues across navigations.
-(async () => {
-  try {
-    console.log('[apply-plugin/content] content script booted on', location.href);
-    const session = await getRecordingSession();
-    console.log('[apply-plugin/content] boot: existing session', session);
-    if (session.active && session.origin === location.origin) {
-      state.buffer = new Map(Object.entries(session.buffer));
-      attachListeners();
-      console.log('[apply-plugin/content] boot: rehydrated session with', state.buffer.size, 'fields');
-    }
-  } catch (e) {
-    console.warn('[apply-plugin/content] failed to rehydrate recording session', e);
-  }
-})();
+// One-time cleanup of any leftover session key from earlier versions.
+clearLegacyRecordingSession().catch(() => {});
 
 async function startFill() {
   const fields = scanFields(document.body);
@@ -279,14 +155,8 @@ function handleAsync(fn, sendResponse) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return false;
   switch (msg.type) {
-    case MSG.RECORD_START:
-      handleAsync(startRecording, sendResponse);
-      return true;
-    case MSG.RECORD_STOP:
-      handleAsync(stopRecording, sendResponse);
-      return true;
-    case MSG.RECORD_STATUS:
-      handleAsync(recordStatus, sendResponse);
+    case MSG.CAPTURE_NOW:
+      handleAsync(captureNow, sendResponse);
       return true;
     case MSG.FILL_START:
       handleAsync(startFill, sendResponse);

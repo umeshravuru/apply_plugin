@@ -1,7 +1,6 @@
 import { MSG } from '../lib/messages.js';
 import {
   getProfile, setProfile, mergeProfile, getSettings, setSettings,
-  getRecordingSession, clearRecordingSession,
 } from '../lib/storage.js';
 
 async function activeTabId() {
@@ -33,78 +32,22 @@ document.querySelectorAll('nav button').forEach((btn) => {
 });
 
 // --- main view ---
-let recording = false;
 const btnRecord = document.getElementById('btn-record');
 const btnFill = document.getElementById('btn-fill');
 
-function setRecordButton(isRecording) {
-  recording = isRecording;
-  btnRecord.textContent = isRecording ? 'Stop Recording' : 'Start Recording';
-}
-
-// On popup open, read recording state straight from chrome.storage.local.
-// This works even if the content script hasn't loaded on the current tab yet
-// (e.g., right after the extension was reloaded).
-async function syncRecordingState() {
-  try {
-    console.log('[apply-plugin/popup] syncRecordingState reading chrome.storage.local');
-    const session = await getRecordingSession();
-    console.log('[apply-plugin/popup] session from storage:', session);
-    setRecordButton(!!session.active);
-    if (session.active) {
-      const captured = Object.keys(session.buffer).length;
-      const tab = await chrome.tabs.query({ active: true, currentWindow: true }).then((t) => t[0]);
-      const tabOrigin = tab?.url ? new URL(tab.url).origin : '';
-      const sameOrigin = !tabOrigin || tabOrigin === session.origin;
-      console.log('[apply-plugin/popup] active session, tabOrigin=', tabOrigin, 'sameOrigin=', sameOrigin);
-      if (sameOrigin) {
-        setStatus('main-status', `Recording on ${session.origin || 'this page'} (${captured} fields captured). Click Stop when done.`, 'ok');
-      } else {
-        setStatus('main-status', `Recording is active on ${session.origin}. Switch back to that site to stop, or click Stop here to discard.`, 'error');
-      }
-    } else {
-      console.log('[apply-plugin/popup] no active session — button stays at Start');
-    }
-  } catch (e) {
-    console.warn('[apply-plugin/popup] syncRecordingState failed', e);
-  }
-}
-syncRecordingState();
-
-async function stopFromStorageDirectly() {
-  // Fallback when the content script isn't reachable (extension was just
-  // reloaded, tab was switched, etc.). Read the persisted session, merge
-  // its buffer into the profile, clear the session.
-  const session = await getRecordingSession();
-  const captured = session.buffer || {};
-  if (Object.keys(captured).length > 0) {
-    await mergeProfile(captured);
-  }
-  await clearRecordingSession();
-  return Object.keys(captured).length;
-}
-
 btnRecord.addEventListener('click', async () => {
+  setStatus('main-status', 'Reading the page…');
   try {
-    if (!recording) {
-      const res = await sendToTab({ type: MSG.RECORD_START });
-      if (!res?.ok) throw new Error(res?.error || 'Could not start');
-      setRecordButton(true);
-      setStatus('main-status', `Recording ${res.fieldCount} fields. Fill the form, then reopen this popup and click Stop.`, 'ok');
+    const res = await sendToTab({ type: MSG.CAPTURE_NOW });
+    if (!res?.ok) throw new Error(res?.error || 'Could not read fields');
+    if (res.savedCount === 0) {
+      setStatus(
+        'main-status',
+        `Scanned ${res.scannedCount} fields but none had values yet. Fill the form first, then click Read Recordings.`,
+        'error',
+      );
     } else {
-      let savedCount;
-      try {
-        const res = await sendToTab({ type: MSG.RECORD_STOP });
-        if (!res?.ok) throw new Error(res?.error || 'Could not stop');
-        savedCount = res.savedCount ?? 0;
-      } catch (e) {
-        // Content script unreachable (e.g., extension was reloaded mid-record).
-        // Fall back to flushing the persisted buffer directly.
-        console.warn('apply-plugin: RECORD_STOP message failed, falling back to storage merge', e);
-        savedCount = await stopFromStorageDirectly();
-      }
-      setRecordButton(false);
-      setStatus('main-status', `Saved ${savedCount} fields to your profile.`, 'ok');
+      setStatus('main-status', `Saved ${res.savedCount} fields to your profile.`, 'ok');
     }
   } catch (e) {
     setStatus('main-status', e.message || String(e), 'error');

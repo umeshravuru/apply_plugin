@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   getProfile, setProfile, mergeProfile,
   getSettings, setSettings, normalizeLabel,
-  getRecordingSession, setRecordingSession, clearRecordingSession,
+  clearLegacyRecordingSession,
 } from '../lib/storage.js';
 
 function mockChromeStorage() {
@@ -93,36 +93,17 @@ describe('settings storage', () => {
   });
 });
 
-describe('recording session storage', () => {
+describe('clearLegacyRecordingSession', () => {
   beforeEach(() => { mockChromeStorage(); });
 
-  it('returns inactive defaults when no session saved', async () => {
-    expect(await getRecordingSession()).toEqual({
-      active: false, origin: '', buffer: {}, startedAt: 0,
-    });
+  it('removes the legacy recordingSession key if present', async () => {
+    await chrome.storage.local.set({ recordingSession: { active: true } });
+    await clearLegacyRecordingSession();
+    const out = await chrome.storage.local.get('recordingSession');
+    expect(out).toEqual({});
   });
 
-  it('saves and retrieves a session', async () => {
-    const s = { active: true, origin: 'https://x.com', buffer: { Email: 'a@b' }, startedAt: 12345 };
-    await setRecordingSession(s);
-    expect(await getRecordingSession()).toEqual(s);
-  });
-
-  it('coerces malformed stored sessions to safe defaults', async () => {
-    // Simulate something else writing junk under the key.
-    await chrome.storage.local.set({ recordingSession: { active: 'yes', buffer: 'broken' } });
-    const s = await getRecordingSession();
-    expect(s.active).toBe(true); // truthy coerces
-    expect(s.buffer).toEqual({}); // non-object buffer falls back
-    expect(s.origin).toBe('');
-    expect(s.startedAt).toBe(0);
-  });
-
-  it('clearRecordingSession removes the key', async () => {
-    await setRecordingSession({ active: true, origin: 'x', buffer: { a: 'b' }, startedAt: 1 });
-    await clearRecordingSession();
-    expect(await getRecordingSession()).toEqual({
-      active: false, origin: '', buffer: {}, startedAt: 0,
-    });
+  it('is a no-op when nothing is stored', async () => {
+    await expect(clearLegacyRecordingSession()).resolves.toBeUndefined();
   });
 });

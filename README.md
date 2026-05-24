@@ -1,6 +1,6 @@
 # Apply Plugin
 
-Record once, auto-fill job applications. Chrome extension, Manifest V3, no backend, free to run (uses your own Gemini API key).
+Snapshot your details once, auto-fill job applications after that. Chrome extension, Manifest V3, no backend, free to run (uses your own Gemini API key).
 
 ## Install (developer mode)
 
@@ -19,14 +19,14 @@ Record once, auto-fill job applications. Chrome extension, Manifest V3, no backe
 
 ## Usage
 
-### Record your details (one-time)
+### Snapshot your details into the profile
 
 1. Open a job application page (any site with form fields).
-2. Click the Apply Plugin icon → **Start Recording**.
-3. Fill the form by hand as usual.
-4. Click the icon → **Stop Recording**. Your entries are saved to your profile.
+2. Fill in the form by hand as you normally would. Don't submit yet.
+3. Click the Apply Plugin icon → **Read Recordings**.
+4. Every filled field is read off the page and merged into your profile.
 
-Repeat on a couple of different application sites to fill out your profile.
+You can do this on any page that already has values you want to capture — your LinkedIn profile, an old draft application, anything. Clicking Read Recordings is always a fresh snapshot of the current page values; it never deletes existing profile entries, only adds or overwrites.
 
 ### Auto-fill a new application
 
@@ -50,7 +50,7 @@ npm test
 ## Manual test checklist (after install)
 
 - [ ] Open Settings, paste API key, click **Test connection** → "Connection OK."
-- [ ] On a Greenhouse demo (or any simple form), click **Start Recording**, fill a few fields, click **Stop Recording** → success message, fields visible under **Profile**.
+- [ ] On a Greenhouse demo (or any simple form), fill a few fields, click **Read Recordings** → success message, fields visible under **Profile**.
 - [ ] On a fresh form, click **Fill This Page** → fields are filled.
 - [ ] On a form with a dropdown your profile doesn't perfectly match (e.g., "United States" vs "US"), verify the dropdown still picks the right option.
 - [ ] On a form with a field your profile has never seen → missing-field panel appears. Fill it, click **Save & fill** → page fills, **Profile** now contains the new label.
