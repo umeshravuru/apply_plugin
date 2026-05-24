@@ -62,3 +62,4 @@ npm test
 - API key and profile are stored only in `chrome.storage.local` on this browser profile.
 - The Gemini call sends your profile (labels + values) and the form's field labels + dropdown options. It does NOT send any values you've already typed into the page.
 - No analytics. No remote backend.
+# apply_plugin
