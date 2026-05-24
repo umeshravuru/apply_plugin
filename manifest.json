@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Apply Plugin",
+  "version": "0.1.0",
+  "description": "Record once, auto-fill job applications.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Apply Plugin",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "content_scripts": [{
+    "matches": ["http://*/*", "https://*/*"],
+    "js": ["content/bootstrap.js"],
+    "css": ["content/content.css"],
+    "run_at": "document_idle"
+  }],
+  "web_accessible_resources": [{
+    "resources": ["content/content.js", "lib/*.js"],
+    "matches": ["http://*/*", "https://*/*"]
+  }]
+}
